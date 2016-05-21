@@ -2,10 +2,12 @@
 *.o
 *.a
 *.so
+main
 
 # Folders
 _obj
 _test
+configs/*
 
 # Architecture specific extensions/prefixes
 *.[568vq]
