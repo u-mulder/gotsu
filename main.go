@@ -1,3 +1,4 @@
+
 package main
 
 import (
@@ -8,68 +9,78 @@ import (
     "log"
     "net/http"
     "encoding/json"
+    "encoding/xml"
     "github.com/PuerkitoBio/goquery"
     "strings"
 )
 
-const (
-    confFile = "run.conf"
-    confFileNAErr = "Config file %s not found. Execution stopped.\n"
-    hashSign = "#"
-)
-
-const (
-    EQ = "eq"
-    GT = "gt"
-    GTE = "gte"
-    LT = "lt"
-    LTE = "lte"
-    NE = "ne"
-)
-
-type configData struct {
-    name string
-    verbose bool
+// Structs for testing via JSON config
+type configJsonEntity struct {
+    Protocol string             `json:"protocol"`
+    Domain string              `json:"domain"`
+    Urls []configJsonUrlEntity  `json:"urls"`
 }
 
-var cfData = new(configData)
-
-type configEntity struct {
-    Protocol string         `json:"protocol"`
-    Domain string           `json:"domain"`
-    Urls []configUrlEntity  `json:"urls"`
-}
-
-type configUrlEntity struct {
-    Url string                      `json:"url"`
-    StatusCode int                  `json:"statusCode"`
-    Elements []configElementEntity  `json:"findElements"`
+type configJsonUrlEntity struct {
+    Url string                          `json:"url"`
+    StatusCode int                      `json:"statusCode"`
+    Elements []configJsonElementEntity  `json:"findElements"`
 
 }
 
-type configElementEntity struct {
+type configJsonElementEntity struct {
     Definition string         `json:"def"`
     CountType string         `json:"countType"`
     Count int                `json:"count"`
 }
 
-var cEntity = new(configEntity)
+// Structs for testing via XML config
+type configXmlEntity struct {
+    XMLName xml.Name        `xml:"urlset"`
+    Urls []SitemapXmlUrl    `xml:"url"`
+}
 
-func main() {
-    // -config=confName
-    var verbose string
-    flag.StringVar(&cfData.name, "config", "default", "Config name, default value is 'default'")
+type SitemapXmlUrl struct {
+    Loc string  `xml:"loc"`
+}
+
+// Config file data struct
+type configData struct {
+    // relative path, where config file is stored
+    filePath string
+    // file type, currently allowed types: "json" and "sitemapxml"
+    fileType string
+    // flag which allows outputting more data while tests are run
+    verbose bool
+}
+
+// Fill configData fields // TODO needs proper testing
+func (cd *configData) init() {
+    var config, filename, filetype, verbose string
+    flag.StringVar(&config, "config", "default", "Config name, default value is 'default'")
+    flag.StringVar(&filename, "filename", "conf", "Config file name w/o extension, 'conf' by default")
+    flag.StringVar(&filetype, "type", "json", "File type, current values 'json' and 'sitemapxml'")
     flag.StringVar(&verbose, "verbose", "y", "Do not show messages for success tests")
     flag.Parse()
 
-    cfData.verbose = verbose == "y"
+    cd.fileType = "json"
+    if filetype == "sitemapxml" {
+        cd.fileType = "xml"
+        filename = "sitemap"
+    }
 
+    cd.filePath = fmt.Sprintf("/configs/%s/%s.%s", config, filename, cd.fileType)
+    cd.verbose = verbose == "y"
+}
+
+// Load finded file and instatiate required enitites
+func (cd *configData) load() {
     curPath, err := filepath.Abs(filepath.Dir(os.Args[0]))
     if err != nil {
         panic("/!\\ Unable to get current exec path")
     }
 
-    confFile := curPath + "/configs/" + cfData.name + "/" + confFile
+    confFile := curPath + cd.filePath
     if fileExists(confFile) {
         file, err := os.Open(confFile)
         if err != nil {
@@ -77,33 +88,75 @@ func main() {
         }
         defer file.Close()
 
-        var decoder = json.NewDecoder(file)
-        err = decoder.Decode(&cEntity)
-        if err != nil {
-            panic("/!\\ Err decoding json file: " + err.Error())
+        switch cd.fileType {
+            case typeJSON:
+                var decoder = json.NewDecoder(file)
+                err = decoder.Decode(&cJsonEntity)
+                if err != nil {
+                    panic("/!\\ Err decoding json file: " + err.Error())
+                }
+                cJsonEntity.runTests()
+
+            case typeXML:
+                var decoder = xml.NewDecoder(file)
+                err = decoder.Decode(&cXmlEntity)
+                if err != nil {
+                    panic("/!\\ Err decoding json file: " + err.Error())
+                }
+                cXmlEntity.runTests()
         }
-
-        cEntity.runTests()
-
     } else {
         panic("/!\\ Config file " + confFile + " not found ")
     }
+
 }
 
+var cfData = new(configData)
+var cJsonEntity = new(configJsonEntity)
+var cXmlEntity = new(configXmlEntity)
 
-func (ce *configEntity) runTests() {
-    fullDomain := fmt.Sprintf("%s://%s", ce.Protocol,  ce.Domain)
+const (
+    typeJSON = "json"
+    typeXML = "xml"
+
+    EQ = "eq"
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+    NE = "ne"
+
+    statusCodeSuccessMsg = "Success. Requesting %s, expected status code %d confirmed\n"
+    statusCodeFailureMsg = "/!\\ Fail. Requesting %s, expected status code %d, got %d\n"
+    statusCodeSysFailMsg = "/!\\ SYSTEMFAIL. Error performing http-request to %s\n"
+)
+
+/*
+Available command line options
+-config = name of config, which is path in app's /config path, required
+-type = type of cofig file, currently allowed types: "json" and "sitemapxml", "json" is default, optional
+-filename = custom name of config file, by default it's "conf", optional
+-verbose = output more data when tests are run, "n" by default, optional
+
+Example run: ./main -config=some_site -type=simplexml -verbose=n -filename=load.xml
+*/
+func main() {
+    cfData.init();
+    cfData.load();
+}
+
+func (ce *configJsonEntity) runTests() {
+    fullDomain := fmt.Sprintf("%s://%s", ce.Protocol, ce.Domain)
     for _, v := range ce.Urls {
         if "" != v.Url {
             v.runTest(fullDomain)
         }
     }
 
-    log.Printf("All tests for config '%s' completed", cfData.name)
+    log.Printf("All tests for config '%s' completed", cfData.filePath)
 }
 
-
-func (cue *configUrlEntity) runTest(domain string) {
+func (cue *configJsonUrlEntity) runTest(domain string) {
     fullUrl := domain + cue.Url
     reqType := "HEAD"
     if 0 < len(cue.Elements) {
@@ -117,7 +170,7 @@ func (cue *configUrlEntity) runTest(domain string) {
     if err == nil {
         if resp.StatusCode == cue.StatusCode {
             if cfData.verbose {
-                printMsg(fmt.Sprintf("Success. Requesting %s, expected status code %d confirmed\n", fullUrl, cue.StatusCode))
+                printMsg(fmt.Sprintf(statusCodeSuccessMsg, fullUrl, cue.StatusCode))
             }
 
             if 0 < len(cue.Elements) {
@@ -131,16 +184,14 @@ func (cue *configUrlEntity) runTest(domain string) {
                 }
             }
         } else {
-            printMsg(fmt.Sprintf("/!\\ Fail. Requesting %s, expected status code %d, got %d\n", fullUrl, cue.StatusCode, resp.StatusCode))
-
+            printMsg(fmt.Sprintf(statusCodeFailureMsg, fullUrl, cue.StatusCode, resp.StatusCode))
         }
     } else {
-        printMsg(fmt.Sprintf("/!\\ SYSTEMFAIL. Error performing http-request to %s\n", fullUrl))
+        printMsg(fmt.Sprintf(statusCodeSysFailMsg, fullUrl))
     }
 }
 
-
-func (cee *configElementEntity) testElement (doc *goquery.Document) {
+func (cee *configJsonElementEntity) testElement (doc *goquery.Document) {
     elDefinition := strings.TrimSpace(cee.Definition)
     elCouType := strings.TrimSpace(cee.CountType)
     selection := doc.Find( elDefinition )
@@ -220,13 +271,42 @@ func (cee *configElementEntity) testElement (doc *goquery.Document) {
     }
 }
 
+func (ce *configXmlEntity) runTests() {
+    for _, v := range ce.Urls {
+        if "" != v.Loc {
+            v.runTest()
+        }
+    }
+
+    log.Printf("All tests for config '%s' completed", cfData.filePath)
+}
+
+func (sxu *SitemapXmlUrl) runTest() {
+    reqType := "HEAD"
+    client := &http.Client{}
+    req, _ := http.NewRequest(reqType, sxu.Loc, nil)
+    resp, err := client.Do(req)
+    /* consider that all urls in sitemap shoud give 200 status code */
+    requiredStatusCode := 200
+
+    if err == nil {
+        if resp.StatusCode == requiredStatusCode {
+            if cfData.verbose {
+                printMsg(fmt.Sprintf(statusCodeSuccessMsg, sxu.Loc, requiredStatusCode))
+            }
+        } else {
+            printMsg(fmt.Sprintf(statusCodeFailureMsg, sxu.Loc, requiredStatusCode, resp.StatusCode))
+        }
+    } else {
+        printMsg(fmt.Sprintf(statusCodeSysFailMsg, sxu.Loc))
+    }
+}
 
 func printMsg(msg string) {
     prLine(false)
     log.Printf(msg)
     prLine(true)
 }
-
 
 func prLine(doubleNl bool) {
     var nl = "\n"
@@ -235,7 +315,6 @@ func prLine(doubleNl bool) {
     }
     fmt.Print("---------------------------" + nl)
 }
-
 
 func getSelectorTestSuccMsg(elDef string, couType string, cou int) string {
     return  fmt.Sprintf(
@@ -246,7 +325,6 @@ func getSelectorTestSuccMsg(elDef string, couType string, cou int) string {
     )
 }
 
-
 func getSelectorTestFailMsg(elDef string, couType string, exCou int, realCou int) string {
     return fmt.Sprintf(
         "/!\\ Fail. Selector: '%s'. Expected size '%s %d', received size %d\n",
@@ -256,7 +334,6 @@ func getSelectorTestFailMsg(elDef string, couType string, exCou int, realCou int
         realCou,
     )
 }
-
 
 func fileExists(fileName string) bool {
     result := true
