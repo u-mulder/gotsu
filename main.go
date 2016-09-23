@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Structs for testing via JSON config
@@ -106,12 +107,12 @@ func (cd *configData) load() {
 	} else {
 		panic("/!\\ Config file " + confFile + " not found ")
 	}
-
 }
 
 var cfData = new(configData)
 var cJsonEntity = new(configJsonEntity)
 var cXmlEntity = new(configXmlEntity)
+var wg sync.WaitGroup
 
 const (
 	typeJSON = "json"
@@ -141,17 +142,19 @@ Example run: ./main -config=some_site -type=sitemapxml -verbose=n -filename=load
 func main() {
 	cfData.init()
 	cfData.load()
+
+	wg.Wait()
+	log.Printf("All tests for config '%s' completed", cfData.filePath)
 }
 
 func (ce *configJsonEntity) runTests() {
 	fullDomain := fmt.Sprintf("%s://%s", ce.Protocol, ce.Domain)
 	for _, v := range ce.Urls {
 		if "" != v.Url {
-			v.runTest(fullDomain)
+			wg.Add(1)
+			go v.runTest(fullDomain)
 		}
 	}
-
-	log.Printf("All tests for config '%s' completed", cfData.filePath)
 }
 
 func (cue *configJsonUrlEntity) runTest(domain string) {
@@ -187,6 +190,8 @@ func (cue *configJsonUrlEntity) runTest(domain string) {
 	} else {
 		printMsg(fmt.Sprintf(statusCodeSysFailMsg, fullUrl))
 	}
+
+	wg.Done()
 }
 
 func (cee *configJsonElementEntity) testElement(doc *goquery.Document) {
@@ -272,11 +277,10 @@ func (cee *configJsonElementEntity) testElement(doc *goquery.Document) {
 func (ce *configXmlEntity) runTests() {
 	for _, v := range ce.Urls {
 		if "" != v.Loc {
-			v.runTest()
+			wg.Add(1)
+			go v.runTest()
 		}
 	}
-
-	log.Printf("All tests for config '%s' completed", cfData.filePath)
 }
 
 func (sxu *SitemapXmlUrl) runTest() {
@@ -298,6 +302,8 @@ func (sxu *SitemapXmlUrl) runTest() {
 	} else {
 		printMsg(fmt.Sprintf(statusCodeSysFailMsg, sxu.Loc))
 	}
+
+	wg.Done()
 }
 
 func printMsg(msg string) {
