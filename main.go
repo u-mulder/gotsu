@@ -152,7 +152,9 @@ func (ce *configJsonEntity) runTests() {
 	for _, v := range ce.Urls {
 		if "" != v.Url {
 			wg.Add(1)
-			go v.runTest(fullDomain)
+			go func(i configJsonUrlEntity) {
+				i.runTest(fullDomain)
+			}(v)
 		}
 	}
 }
@@ -278,7 +280,9 @@ func (ce *configXmlEntity) runTests() {
 	for _, v := range ce.Urls {
 		if "" != v.Loc {
 			wg.Add(1)
-			go v.runTest()
+			go func(i SitemapXmlUrl) {
+				i.runTest()
+			}(v)
 		}
 	}
 }
