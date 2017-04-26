@@ -15,26 +15,28 @@ import (
 )
 
 // Structs for testing via JSON config
-type configJsonEntity struct {
-	Protocol string                `json:"protocol"`
-	Domain   string                `json:"domain"`
-	Urls     []configJsonUrlEntity `json:"urls"`
+type configJSONEntity struct {
+	Protocol      string                `json:"protocol"`
+	Domain        string                `json:"domain"`
+	CheckPageURLs bool                  `json:"checkUrls"`
+	Urls          []configJSONURLEntity `json:"urls"`
 }
 
-type configJsonUrlEntity struct {
-	Url        string                    `json:"url"`
-	StatusCode int                       `json:"statusCode"`
-	Elements   []configJsonElementEntity `json:"findElements"`
+type configJSONURLEntity struct {
+	Url           string                    `json:"url"`
+	StatusCode    int                       `json:"statusCode"`
+	Elements      []configJSONElementEntity `json:"findElements"`
+	SkipURLsCheck bool                      `json:"skipUrlsCheck"`
 }
 
-type configJsonElementEntity struct {
+type configJSONElementEntity struct {
 	Definition string `json:"def"`
 	CountType  string `json:"countType"`
 	Count      int    `json:"count"`
 }
 
 // Structs for testing via XML config
-type configXmlEntity struct {
+type configXMLEntity struct {
 	XMLName xml.Name        `xml:"urlset"`
 	Urls    []SitemapXmlUrl `xml:"url"`
 }
@@ -51,6 +53,88 @@ type configData struct {
 	fileType string
 	// flag which allows outputting more data while tests are run
 	verbose bool
+}
+
+// Struct `pageLinks` stores
+// - urls found on a checked page in `URLs`
+// - urls which has been already checked in `SourceURLs`
+// - domain to add to urls from `URLs` property
+type pageLinks struct {
+	Domain     string
+	URLs       map[string]map[string]int
+	SourceURLs map[string]int
+}
+
+// Create new `pageLinks` instance
+func newPageLinks() *pageLinks {
+	pl := &pageLinks{
+		URLs:       make(map[string]map[string]int),
+		SourceURLs: make(map[string]int),
+	}
+
+	return pl
+}
+
+// Add new URL which should be checked
+func (pl *pageLinks) addURL(key, value string) {
+	if _, ok := pl.URLs[key]; !ok {
+		pl.URLs[key] = map[string]int{}
+	}
+
+	if _, ok := pl.URLs[key][value]; !ok {
+		pl.URLs[key][value] = 1
+	}
+}
+
+// Add new URL to indicate that this URL has been checked already
+func (pl *pageLinks) addSourceURL(key string) {
+	if _, ok := pl.SourceURLs[key]; !ok {
+		pl.SourceURLs[key] = 1
+	}
+}
+
+// `savePageLinks` search for `a` tags inside a document and
+// saves its' non-empty href attributes in a struct's field
+func (pl *pageLinks) savePageLinks(doc *goquery.Document, pageURL string) {
+	selection := doc.Find("a")
+	selection.Each(func(i int, s *goquery.Selection) {
+		if url, ok := s.Attr("href"); ok && "" != url && isLocalURL(url) {
+			pl.addURL(url, pageURL)
+		}
+	})
+
+	pl.addSourceURL(pageURL)
+}
+
+func (pl *pageLinks) checkPageLinks() {
+	var fullURL string
+	for k := range pl.URLs {
+		fullURL = pl.Domain + k
+		if _, ok := pl.SourceURLs[fullURL]; !ok {
+			wg.Add(1)
+			go func(URL string) {
+				client := &http.Client{}
+				req, _ := http.NewRequest(http.MethodHead, URL, nil)
+				resp, err := client.Do(req)
+
+				if err == nil {
+					if resp.StatusCode == http.StatusOK {
+						if cfData.verbose {
+							printMsg(fmt.Sprintf(statusCodeSuccessMsg, URL, http.StatusOK))
+						}
+
+					} else {
+						// _ from range stores URLs where this url is met
+						printMsg(fmt.Sprintf(statusCodeFailureMsg, URL, http.StatusOK, resp.StatusCode))
+					}
+				} else {
+					printMsg(fmt.Sprintf(statusCodeSysFailMsg, URL))
+				}
+
+				wg.Done()
+			}(fullURL)
+		}
+	}
 }
 
 // Fill configData fields // TODO needs proper testing
@@ -90,184 +174,197 @@ func (cd *configData) load() {
 		switch cd.fileType {
 		case typeJSON:
 			var decoder = json.NewDecoder(file)
-			err = decoder.Decode(&cJsonEntity)
+			err = decoder.Decode(&cJSONEntity)
 			if err != nil {
 				panic("/!\\ Err decoding json file: " + err.Error())
 			}
-			cJsonEntity.runTests()
+			cJSONEntity.runTests()
 
 		case typeXML:
 			var decoder = xml.NewDecoder(file)
-			err = decoder.Decode(&cXmlEntity)
+			err = decoder.Decode(&cXMLEntity)
 			if err != nil {
 				panic("/!\\ Err decoding json file: " + err.Error())
 			}
-			cXmlEntity.runTests()
+			cXMLEntity.runTests()
 		}
 	} else {
 		panic("/!\\ Config file " + confFile + " not found ")
 	}
 }
 
-var cfData = new(configData)
-var cJsonEntity = new(configJsonEntity)
-var cXmlEntity = new(configXmlEntity)
+var cfData = configData{}
+var cJSONEntity = configJSONEntity{}
+var cXMLEntity = configXMLEntity{}
 var wg sync.WaitGroup
+var pl = newPageLinks()
 
 const (
 	typeJSON = "json"
 	typeXML  = "xml"
 
-	EQ  = "eq"
-	GT  = "gt"
-	GTE = "gte"
-	LT  = "lt"
-	LTE = "lte"
-	NE  = "ne"
+	sizeEq  = "eq"
+	sizeGt  = "gt"
+	sizeGte = "gte"
+	sizeLt  = "lt"
+	sizeLte = "lte"
+	sizeNe  = "ne"
 
-	statusCodeSuccessMsg = "Success. Requesting %s, expected status code %d confirmed\n"
-	statusCodeFailureMsg = "/!\\ Fail. Requesting %s, expected status code %d, got %d\n"
-	statusCodeSysFailMsg = "/!\\ SYSTEMFAIL. Error performing http-request to %s\n"
+	prefixHTTP       = "http"
+	prefixHTTPS      = "https"
+	prefixNoProtocol = "//"
+
+	statusCodeSuccessMsg  = "Success. Requesting %s, expected status code %d confirmed\n"
+	statusCodeFailureMsg  = "/!\\ Fail. Requesting %s, expected status code %d, got %d\n"
+	statusCodeSysFailMsg  = "/!\\ SYSTEMFAIL. Error performing http-request to %s\n"
+	selectorTestUnsuppMsg = "/!\\ Fail. Not supported elCouType %s\n"
 )
 
-/*
-Available command line options
--config = name of config, which is path in app's /config path, required
--type = type of cofig file, currently allowed types: "json" and "sitemapxml", "json" is default, optional
--filename = custom name of config file, by default it's "conf", optional
--verbose = output more data when tests are run, "n" by default, optional
-
-Example run: ./main -config=some_site -type=sitemapxml -verbose=n -filename=load
-*/
+// Available command line options
+// -config = name of config, which is path in app's /config path, required
+// -type = type of cofig file, currently allowed types: "json" and "sitemapxml", "json" is default, optional
+// -filename = custom name of config file, by default it's "conf", optional
+// -verbose = output more data when tests are run, "n" by default, optional
+//
+// Example run: ./main -config=some_site -type=sitemapxml -verbose=n -filename=load
 func main() {
 	cfData.init()
 	cfData.load()
 
 	wg.Wait()
+
+	pl.checkPageLinks()
+	wg.Wait()
+
 	log.Printf("All tests for config '%s' completed", cfData.filePath)
 }
 
-func (ce *configJsonEntity) runTests() {
+// Run tests for each url in a config
+func (ce *configJSONEntity) runTests() {
 	fullDomain := fmt.Sprintf("%s://%s", ce.Protocol, ce.Domain)
+	pl.Domain = fullDomain
 	for _, v := range ce.Urls {
 		if "" != v.Url {
 			wg.Add(1)
-			go func(i configJsonUrlEntity) {
-				i.runTest(fullDomain)
+			go func(i configJSONURLEntity) {
+				i.runTest(fullDomain, ce.CheckPageURLs)
 			}(v)
 		}
 	}
 }
 
-func (cue *configJsonUrlEntity) runTest(domain string) {
-	fullUrl := domain + cue.Url
+// `runTest` performs test for a single url from config
+func (cue *configJSONURLEntity) runTest(domain string, checkURLs bool) {
+	fullURL := domain + cue.Url
 	reqType := "HEAD"
-	if 0 < len(cue.Elements) {
+	checkPageLinks := checkURLs && !cue.SkipURLsCheck
+	if 0 < len(cue.Elements) || checkPageLinks {
 		reqType = "GET"
 	}
 
 	client := &http.Client{}
-	req, _ := http.NewRequest(reqType, fullUrl, nil)
+	req, _ := http.NewRequest(reqType, fullURL, nil)
 	resp, err := client.Do(req)
 
 	if err == nil {
 		if resp.StatusCode == cue.StatusCode {
 			if cfData.verbose {
-				printMsg(fmt.Sprintf(statusCodeSuccessMsg, fullUrl, cue.StatusCode))
+				printMsg(fmt.Sprintf(statusCodeSuccessMsg, fullURL, cue.StatusCode))
 			}
 
-			if 0 < len(cue.Elements) {
+			if reqType == "GET" {
 				doc, err := goquery.NewDocumentFromResponse(resp)
 				if err == nil {
-					for _, v := range cue.Elements {
-						v.testElement(doc)
+					if 0 < len(cue.Elements) {
+						for _, v := range cue.Elements {
+							v.testElement(doc)
+						}
+					}
+
+					if checkPageLinks {
+						pl.savePageLinks(doc, fullURL)
 					}
 				} else {
-					printMsg(fmt.Sprintf("/!\\ SYSTEMFAIL. Error reading http-request body from %s\n", fullUrl))
+					printMsg(fmt.Sprintf("/!\\ SYSTEMFAIL. Error reading http-request body from %s\n", fullURL))
 				}
 			}
 		} else {
-			printMsg(fmt.Sprintf(statusCodeFailureMsg, fullUrl, cue.StatusCode, resp.StatusCode))
+			printMsg(fmt.Sprintf(statusCodeFailureMsg, fullURL, cue.StatusCode, resp.StatusCode))
 		}
 	} else {
-		printMsg(fmt.Sprintf(statusCodeSysFailMsg, fullUrl))
+		printMsg(fmt.Sprintf(statusCodeSysFailMsg, fullURL))
 	}
 
 	wg.Done()
 }
 
-func (cee *configJsonElementEntity) testElement(doc *goquery.Document) {
+// `testElement` tests if size of a selecteor mathes condition
+func (cee *configJSONElementEntity) testElement(doc *goquery.Document) {
 	elDefinition := strings.TrimSpace(cee.Definition)
 	elCouType := strings.TrimSpace(cee.CountType)
 	selection := doc.Find(elDefinition)
-	msg := fmt.Sprintf("/!\\ Fail. Not supported elCouType %s\n", elCouType)
+	msg := fmt.Sprintf(selectorTestUnsuppMsg, elCouType)
 
 	selLen := selection.Length()
 	switch elCouType {
-	case EQ:
+	case sizeEq:
 		if selLen == cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, EQ, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeEq, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, EQ, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeEq, cee.Count, selLen)
 		}
 
-	case GT:
+	case sizeGt:
 		if selLen > cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, GT, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeGt, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, GT, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeGt, cee.Count, selLen)
 		}
 
-	case GTE:
+	case sizeGte:
 		if selLen >= cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, GTE, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeGte, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, GTE, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeGte, cee.Count, selLen)
 		}
 
-	case LT:
+	case sizeLt:
 		if selLen < cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, LT, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeLt, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, LT, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeLt, cee.Count, selLen)
 		}
 
-	case LTE:
+	case sizeLte:
 		if selLen <= cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, LTE, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeLte, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, LTE, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeLte, cee.Count, selLen)
 		}
 
-	case NE:
+	case sizeNe:
 		if selLen != cee.Count {
+			msg = ""
 			if cfData.verbose {
-				msg = getSelectorTestSuccMsg(elDefinition, NE, cee.Count)
-			} else {
-				msg = ""
+				msg = getSelectorTestSuccMsg(elDefinition, sizeNe, cee.Count)
 			}
 		} else {
-			msg = getSelectorTestFailMsg(elDefinition, NE, cee.Count, selLen)
+			msg = getSelectorTestFailMsg(elDefinition, sizeNe, cee.Count, selLen)
 		}
 	}
 
@@ -276,7 +373,7 @@ func (cee *configJsonElementEntity) testElement(doc *goquery.Document) {
 	}
 }
 
-func (ce *configXmlEntity) runTests() {
+func (ce *configXMLEntity) runTests() {
 	for _, v := range ce.Urls {
 		if "" != v.Loc {
 			wg.Add(1)
@@ -353,4 +450,9 @@ func fileExists(fileName string) bool {
 	}
 
 	return result
+}
+
+// Every url which not starts with `http` or `https` or `//` is considered local
+func isLocalURL(url string) bool {
+	return !strings.HasPrefix(url, prefixHTTP) && !strings.HasPrefix(url, prefixHTTPS) && !strings.HasPrefix(url, prefixNoProtocol)
 }
