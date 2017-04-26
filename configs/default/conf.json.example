@@ -1,0 +1,24 @@
+{
+    "protocol": "https",
+    "domain": "www.site.com",
+    "urls": [
+        {
+            "url": "\/",
+            "statusCode": 200,
+            "skipUrlsCheck": true,
+            "findElements": [
+                {
+                    "def": ".item-class",
+                    "countType": "eq",
+                    "count": 3
+                }
+            ]
+        },
+        {
+            "url": "\/about\/",
+            "statusCode": 200,
+            "findElements": []
+        }
+    ],
+    "checkUrls": true
+}
