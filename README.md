@@ -2,9 +2,9 @@
 Testing web apps with Go
 
 # Contents
- - [Install](#Install)
- - [Run](#Run)
- - [Config format](#ConfigFormat)
+ - [Install](#install)
+ - [Run](#run)
+ - [Config format](#config-format)
 
 # Install
 Install app using `git clone` command
@@ -18,32 +18,32 @@ In app directory create a `config` folder.
 
 App runs from command line:
 
-    > ./appname [parameters]
+  `> ./appname [parameters]`
 
 Available command line parameters:
 
  - `-config` - mandatory, name of config, which is path in app's `/config` path
  - `-type` - optional, type of config file, currently allowed types (`json` and `sitemapxml`), `json` is default,
  - `-filename` - optional, custom name of config file without extension, by default it's `"conf"`
- - `-verbose` - optional, output more / less data when tests are run, available values: (`n`, 'y'), `y` by default
+ - `-verbose` - optional, output more / less data when tests are run, available values: (`n`, `y`), `y` by default
 
 Examples:
 
  - Test urls from `./config/mysite/conf.json` config file
 
-    > ./appname -config=mysite
+  `> ./appname -config=mysite`
 
  - Test urls from `./config/myothersite/conf.xml` xml-config file
 
-    > ./appname -config=myothersite -type=sitemapxml
+  `> ./appname -config=myothersite -type=sitemapxml`
 
  - Test urls from `./config/mysite/conf.json` config file and output only fail messages
 
-    > ./appname -config=mysite -verbose=n
+  `> ./appname -config=mysite -verbose=n`
 
  - Test urls from `./config/mysite/urls.json` config file
 
-    > ./appname -config=mysite -filename=urls
+  `> ./appname -config=mysite -filename=urls`
 
 # Config format
 App supports config files in `json` and `xml` formats.
