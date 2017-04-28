@@ -120,15 +120,15 @@ func (pl *pageLinks) checkPageLinks() {
 				if err == nil {
 					if resp.StatusCode == http.StatusOK {
 						if cfData.verbose {
-							printMsg(fmt.Sprintf(statusCodeSuccessMsg, URL, http.StatusOK))
+							notify(cn, fmt.Sprintf(statusCodeSuccessMsg, URL, http.StatusOK))
 						}
 
 					} else {
 						// _ from range stores URLs where this url is met
-						printMsg(fmt.Sprintf(statusCodeFailureMsg, URL, http.StatusOK, resp.StatusCode))
+						notify(cn, fmt.Sprintf(statusCodeFailureMsg, URL, http.StatusOK, resp.StatusCode))
 					}
 				} else {
-					printMsg(fmt.Sprintf(statusCodeSysFailMsg, URL))
+					notify(cn, fmt.Sprintf(statusCodeSysFailMsg, URL))
 				}
 
 				wg.Done()
@@ -193,11 +193,30 @@ func (cd *configData) load() {
 	}
 }
 
+// Notification interface
+type notifier interface {
+	SendNotification(string)
+}
+
+type cliNotifier struct{}
+
+// Realisation of interface method for `cliNotifier`
+func (cn cliNotifier) SendNotification(msg string) {
+	fmt.Print("---------------------------\n")
+	log.Printf(msg)
+	fmt.Print("---------------------------\n\n")
+}
+
+func notify(n notifier, msg string) {
+	n.SendNotification(msg)
+}
+
 var cfData = configData{}
 var cJSONEntity = configJSONEntity{}
 var cXMLEntity = configXMLEntity{}
 var wg sync.WaitGroup
 var pl = newPageLinks()
+var cn = cliNotifier{}
 
 const (
 	typeJSON = "json"
@@ -213,6 +232,9 @@ const (
 	prefixHTTP       = "http"
 	prefixHTTPS      = "https"
 	prefixNoProtocol = "//"
+	prefixMailTo     = "mailto:"
+	prefixSkypeTo    = "skype:"
+	prefixTelTo      = "tel:"
 
 	statusCodeSuccessMsg  = "Success. Requesting %s, expected status code %d confirmed\n"
 	statusCodeFailureMsg  = "/!\\ Fail. Requesting %s, expected status code %d, got %d\n"
@@ -269,7 +291,7 @@ func (cue *configJSONURLEntity) runTest(domain string, checkURLs bool) {
 	if err == nil {
 		if resp.StatusCode == cue.StatusCode {
 			if cfData.verbose {
-				printMsg(fmt.Sprintf(statusCodeSuccessMsg, fullURL, cue.StatusCode))
+				notify(cn, fmt.Sprintf(statusCodeSuccessMsg, fullURL, cue.StatusCode))
 			}
 
 			if reqType == "GET" {
@@ -285,14 +307,14 @@ func (cue *configJSONURLEntity) runTest(domain string, checkURLs bool) {
 						pl.savePageLinks(doc, fullURL)
 					}
 				} else {
-					printMsg(fmt.Sprintf("/!\\ SYSTEMFAIL. Error reading http-request body from %s\n", fullURL))
+					notify(cn, fmt.Sprintf("/!\\ SYSTEMFAIL. Error reading http-request body from %s\n", fullURL))
 				}
 			}
 		} else {
-			printMsg(fmt.Sprintf(statusCodeFailureMsg, fullURL, cue.StatusCode, resp.StatusCode))
+			notify(cn, fmt.Sprintf(statusCodeFailureMsg, fullURL, cue.StatusCode, resp.StatusCode))
 		}
 	} else {
-		printMsg(fmt.Sprintf(statusCodeSysFailMsg, fullURL))
+		notify(cn, fmt.Sprintf(statusCodeSysFailMsg, fullURL))
 	}
 
 	wg.Done()
@@ -369,7 +391,7 @@ func (cee *configJSONElementEntity) testElement(doc *goquery.Document) {
 	}
 
 	if "" != msg {
-		printMsg(msg)
+		notify(cn, msg)
 	}
 }
 
@@ -395,30 +417,16 @@ func (sxu *SitemapXmlUrl) runTest() {
 	if err == nil {
 		if resp.StatusCode == requiredStatusCode {
 			if cfData.verbose {
-				printMsg(fmt.Sprintf(statusCodeSuccessMsg, sxu.Loc, requiredStatusCode))
+				notify(cn, fmt.Sprintf(statusCodeSuccessMsg, sxu.Loc, requiredStatusCode))
 			}
 		} else {
-			printMsg(fmt.Sprintf(statusCodeFailureMsg, sxu.Loc, requiredStatusCode, resp.StatusCode))
+			notify(cn, fmt.Sprintf(statusCodeFailureMsg, sxu.Loc, requiredStatusCode, resp.StatusCode))
 		}
 	} else {
-		printMsg(fmt.Sprintf(statusCodeSysFailMsg, sxu.Loc))
+		notify(cn, fmt.Sprintf(statusCodeSysFailMsg, sxu.Loc))
 	}
 
 	wg.Done()
-}
-
-func printMsg(msg string) {
-	prLine(false)
-	log.Printf(msg)
-	prLine(true)
-}
-
-func prLine(doubleNl bool) {
-	var nl = "\n"
-	if doubleNl {
-		nl = "\n\n"
-	}
-	fmt.Print("---------------------------" + nl)
 }
 
 func getSelectorTestSuccMsg(elDef string, couType string, cou int) string {
@@ -452,7 +460,12 @@ func fileExists(fileName string) bool {
 	return result
 }
 
-// Every url which not starts with `http` or `https` or `//` is considered local
+// Every url which not starts with `http` or `https` or `//` or `mailto:` or `tel:` is considered local
 func isLocalURL(url string) bool {
-	return !strings.HasPrefix(url, prefixHTTP) && !strings.HasPrefix(url, prefixHTTPS) && !strings.HasPrefix(url, prefixNoProtocol)
+	return !strings.HasPrefix(url, prefixHTTP) &&
+		!strings.HasPrefix(url, prefixHTTPS) &&
+		!strings.HasPrefix(url, prefixNoProtocol) &&
+		!strings.HasPrefix(url, prefixMailTo) &&
+		!strings.HasPrefix(url, prefixSkypeTo) &&
+		!strings.HasPrefix(url, prefixTelTo)
 }
