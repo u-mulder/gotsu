@@ -235,6 +235,7 @@ const (
 	prefixMailTo     = "mailto:"
 	prefixSkypeTo    = "skype:"
 	prefixTelTo      = "tel:"
+	prefixFragment   = "#"
 
 	statusCodeSuccessMsg  = "Success. Requesting %s, expected status code %d confirmed\n"
 	statusCodeFailureMsg  = "/!\\ Fail. Requesting %s, expected status code %d, got %d\n"
@@ -467,5 +468,6 @@ func isLocalURL(url string) bool {
 		!strings.HasPrefix(url, prefixNoProtocol) &&
 		!strings.HasPrefix(url, prefixMailTo) &&
 		!strings.HasPrefix(url, prefixSkypeTo) &&
-		!strings.HasPrefix(url, prefixTelTo)
+		!strings.HasPrefix(url, prefixTelTo) &&
+		!strings.HasPrefix(url, prefixFragment)
 }
